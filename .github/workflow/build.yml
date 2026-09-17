@@ -1,0 +1,97 @@
+name: Build Armbian ROCK Pi 4A
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Armbian
+        uses: actions/checkout@v4
+        with:
+          repository: armbian/build
+          ref: v26.08
+          fetch-depth: 1
+
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Check environment
+        run: |
+          echo "Host:"
+          uname -a
+          echo
+
+          echo "Architecture:"
+          uname -m
+          echo
+
+          echo "Binfmt:"
+          ls -la /proc/sys/fs/binfmt_misc/ || true
+          echo
+
+          update-binfmts --display qemu-aarch64 || true
+          echo
+
+          echo "Docker:"
+          docker version
+          echo
+
+          echo "Armbian:"
+          git branch --show-current
+          git log -1 --oneline
+
+          test -f config/boards/rockpi-4a.csc
+          echo "rockpi-4a.csc found"
+
+      - name: Build Armbian
+        run: |
+          ./compile.sh \
+            BOARD=rockpi-4a \
+            BRANCH=current \
+            RELEASE=resolute \
+            BUILD_DESKTOP=no \
+            BUILD_MINIMAL=yes \
+            BETA=no \
+            KERNEL_CONFIGURE=no \
+            KERNEL_GIT=shallow
+
+      - name: List generated images
+        if: always()
+        run: |
+          echo "=== output/images ==="
+          ls -lah output/images/ || true
+
+      - name: Upload image
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: armbian-rockpi-4a
+          path: output/images/*
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: success()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: Armbian ROCK Pi 4A ${{ inputs.version }}
+          generate_release_notes: true
+          files: output/images/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
